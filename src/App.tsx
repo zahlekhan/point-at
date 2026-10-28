@@ -23,6 +23,9 @@ const STORY = 'https://techcrunch.com/2026/10/26/x-is-nudging-users-to-promote-t
 const DRAFT = 'is it just me or is there a giant arm in the composer'
 const SCARE_AT = 22
 
+// Phones have no hover, and focusing the composer there would pull up the keyboard.
+const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches
+
 const install = `npx shadcn@latest add ${REGISTRY}`
 
 const usage = `import { PointAt, PointAtHover, promoteHand } from "@/components/ui/point-at"
@@ -49,18 +52,19 @@ export default function App() {
         </a>
       </header>
 
-      <section className="flex min-h-[calc(100svh-68px)] flex-col items-center justify-center px-4 pb-16">
+      <section className="flex flex-col items-center px-4 pt-12 pb-16 sm:min-h-[calc(100svh-68px)] sm:justify-center sm:pt-0">
         <Composer open={heroOpen} onOpenChange={setHeroOpen} />
         <p className="mt-8 max-w-[600px] text-center text-[15px] leading-relaxed text-[#71767b] text-balance">
           In October 2026, X started pointing a giant hand at the Promote button.{' '}
           <a href={STORY} className="text-[#e7e9ea] underline decoration-[#536471] underline-offset-4">
             People hated it
           </a>
-          . It's now a shadcn component. Hover any button.
+          . It's now a shadcn component.
+          <span className="hidden [@media(hover:hover)]:inline"> Hover any button.</span>
         </p>
       </section>
 
-      <section className="mx-auto max-w-[600px] px-4 py-24">
+      <section className="mx-auto max-w-[600px] px-4 py-12 sm:py-24">
         <Code code={install} />
         <Code code={usage} className="mt-3" />
       </section>
@@ -128,7 +132,7 @@ function Composer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: 
             Everyone <ChevronDown className="size-4" />
           </span>
           <textarea
-            autoFocus
+            autoFocus={canHover}
             value={draft}
             onPointerDown={stopAutotype}
             onKeyDown={stopAutotype}
@@ -254,7 +258,7 @@ function Code({ code, className }: { code: string; className?: string }) {
       >
         {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
       </button>
-      <pre className="overflow-x-auto pr-10 font-mono text-[13px] leading-relaxed text-[#e7e9ea]">
+      <pre className="mr-8 overflow-x-auto font-mono text-[13px] leading-relaxed text-[#e7e9ea]">
         <code>{code}</code>
       </pre>
     </div>

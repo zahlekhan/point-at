@@ -1,3 +1,5 @@
+'use client'
+
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 
@@ -17,7 +19,7 @@ type PointAtProps = {
   onOpenChange?: (open: boolean) => void
   /** Degrees the arm is rotated. 0 points straight up, positive leans right. */
   angle?: number
-  /** Hand height in px. With `src`, the rendered image width instead. */
+  /** Hand height in px. With `src`, the rendered image width instead. Shrinks to fit narrow screens. */
   size?: number
   /** Optional hand image used instead of the drawn one. */
   src?: string
@@ -25,6 +27,11 @@ type PointAtProps = {
   tip?: { x: number; y: number }
   /** Direction the arm runs in `src`, in degrees from straight down toward the left. The hand slides in along it. */
   armAngle?: number
+  /**
+   * Lengthen the arm by repeating the end of the sleeve, so it reaches off-screen at any size.
+   * Only for images whose arm ends in a straight, even sleeve along `armAngle`, like `promoteHand`.
+   */
+  extend?: boolean
   /** Delay before the hand jumps in, in ms. */
   delay?: number
   /** Keep tapping the target while open. */
@@ -41,7 +48,13 @@ const promoteHand = {
   armAngle: 41.8,
   angle: 0,
   size: 930,
+  extend: true,
 } satisfies Partial<PointAtProps>
+
+// For `extend`, as fractions of the image's length along the arm: how much of it is solid
+// sleeve, and how far each extra copy sits further along (its hand and cuff masked out).
+const SLEEVE_REACH = 0.8
+const SLEEVE_STEP = 0.45
 
 // Fingertip position inside the SVG viewBox (0 0 200 520).
 const VIEW_W = 200
@@ -61,6 +74,7 @@ function PointAt({
   src,
   tip = { x: 0.5, y: 0 },
   armAngle = 0,
+  extend = false,
   delay = 0,
   tap = true,
   dismissible = true,
@@ -76,15 +90,20 @@ function PointAt({
     [openProp, onOpenChange],
   )
 
+  // Keep the hand in proportion on phones instead of burying the whole screen.
+  const viewport = useViewportSize()
+  const scale = Math.min(size, Math.round(viewport.width * (src ? 1.15 : 1.1)))
+
   // Offset along the arm, away from the target.
   const rad = (armAngle * Math.PI) / 180
   const along = (d: number) => `translate(${-Math.sin(rad) * d}px, ${Math.cos(rad) * d}px)`
-  const away = src ? size * 1.4 : size * 1.2
+  const away = src ? scale * 1.4 : scale * 1.2
 
   const targetRef = React.useRef<HTMLSpanElement>(null)
   const armRef = React.useRef<HTMLDivElement>(null)
   const [point, setPoint] = React.useState<{ x: number; y: number } | null>(null)
   const [visible, setVisible] = React.useState(false)
+  const [aspect, setAspect] = React.useState<number | null>(null)
 
   // Mount after `delay`, unmount after the exit animation.
   React.useEffect(() => {
@@ -96,6 +115,7 @@ function PointAt({
           const img = new Image()
           img.src = src
           await img.decode().catch(() => {})
+          if (img.naturalWidth) setAspect(img.naturalHeight / img.naturalWidth)
         }
         if (!cancelled) setVisible(true)
       }, delay)
@@ -106,10 +126,11 @@ function PointAt({
     }
     const arm = armRef.current
     if (!arm) return setVisible(false)
-    const exit = arm.animate(
-      [{ transform: along(0) }, { transform: along(away) }],
-      { duration: 260, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'forwards' },
-    )
+    const exit = arm.animate([{ transform: along(0) }, { transform: along(away) }], {
+      duration: 260,
+      easing: 'cubic-bezier(.5,0,.75,0)',
+      fill: 'forwards',
+    })
     exit.onfinish = () => setVisible(false)
     return () => exit.cancel()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,7 +164,7 @@ function PointAt({
     const enter = arm.animate(
       [
         { transform: along(away) },
-        { transform: along(-size * 0.03), offset: 0.7 },
+        { transform: along(-scale * 0.03), offset: 0.7 },
         { transform: along(0) },
       ],
       { duration: 380, easing: 'cubic-bezier(.2,.9,.3,1.2)', fill: 'forwards' },
@@ -154,7 +175,7 @@ function PointAt({
       tapping = arm.animate(
         [
           { transform: along(0) },
-          { transform: along(size * 0.025), offset: 0.35 },
+          { transform: along(scale * 0.025), offset: 0.35 },
           { transform: along(0), offset: 0.6 },
           { transform: along(0) },
         ],
@@ -181,7 +202,24 @@ function PointAt({
     }
   }, [open, dismissible, setOpen])
 
-  const width = src ? size : (size * VIEW_W) / VIEW_H
+  const width = src ? scale : (scale * VIEW_W) / VIEW_H
+
+  // Just enough sleeve copies to reach past the far corner of the screen, and no more:
+  // each one is a full-size image to composite.
+  const length = aspect
+    ? width * Math.abs(Math.sin(rad)) + width * aspect * Math.abs(Math.cos(rad))
+    : 0
+  const copies =
+    src && extend && length
+      ? Math.max(
+          0,
+          Math.ceil(
+            (Math.hypot(viewport.width, viewport.height) - SLEEVE_REACH * length) /
+              (SLEEVE_STEP * length),
+          ),
+        )
+      : 0
+  const mask = `linear-gradient(${180 + armAngle}deg, transparent 25%, #000 35%)`
 
   return (
     <>
@@ -193,41 +231,70 @@ function PointAt({
       {visible &&
         point &&
         createPortal(
+          // A viewport-sized layer that clips the arm, so it can't cause sideways scrolling on mobile.
           <div
             data-slot="point-at"
             aria-hidden
-            className={cn('pointer-events-none fixed z-50', className)}
-            style={{
-              left: point.x,
-              top: point.y,
-              transform: `rotate(${angle}deg)`,
-              transformOrigin: '0 0',
-              transition: glide ? 'left 280ms cubic-bezier(.3,.9,.3,1), top 280ms cubic-bezier(.3,.9,.3,1)' : undefined,
-            }}
+            className={cn('pointer-events-none fixed inset-0 z-50 overflow-hidden', className)}
           >
-            <div ref={armRef} style={{ transform: along(away) }}>
-              {src ? (
-                <img
-                  src={src}
-                  alt=""
-                  draggable={false}
-                  className="absolute top-0 left-0 max-w-none select-none drop-shadow-[8px_14px_18px_rgba(0,0,0,0.45)]"
-                  style={{
-                    width,
-                    transform: `translate(${-tip.x * 100}%, ${-tip.y * 100}%)`,
-                  }}
-                />
-              ) : (
-                <PointingHand
-                  width={width}
-                  height={size}
-                  style={{
-                    position: 'absolute',
-                    left: -(TIP_X / VIEW_W) * width,
-                    top: -(TIP_Y / VIEW_H) * size,
-                  }}
-                />
-              )}
+            <div
+              className="absolute"
+              style={{
+                left: point.x,
+                top: point.y,
+                transform: `rotate(${angle}deg)`,
+                transformOrigin: '0 0',
+                transition: glide
+                  ? 'left 280ms cubic-bezier(.3,.9,.3,1), top 280ms cubic-bezier(.3,.9,.3,1)'
+                  : undefined,
+              }}
+            >
+              <div
+                ref={armRef}
+                className="will-change-transform"
+                style={{ transform: along(away) }}
+              >
+                {Array.from({ length: copies }, (_, i) => {
+                  const offset = along(length * SLEEVE_STEP * (copies - i))
+                  return (
+                    <img
+                      key={i}
+                      src={src}
+                      alt=""
+                      draggable={false}
+                      className="absolute top-0 left-0 max-w-none select-none"
+                      style={{
+                        width,
+                        transform: `${offset} translate(${-tip.x * 100}%, ${-tip.y * 100}%)`,
+                        maskImage: mask,
+                        WebkitMaskImage: mask,
+                      }}
+                    />
+                  )
+                })}
+                {src ? (
+                  <img
+                    src={src}
+                    alt=""
+                    draggable={false}
+                    className="absolute top-0 left-0 max-w-none select-none drop-shadow-[8px_14px_18px_rgba(0,0,0,0.45)]"
+                    style={{
+                      width,
+                      transform: `translate(${-tip.x * 100}%, ${-tip.y * 100}%)`,
+                    }}
+                  />
+                ) : (
+                  <PointingHand
+                    width={width}
+                    height={scale}
+                    style={{
+                      position: 'absolute',
+                      left: -(TIP_X / VIEW_W) * width,
+                      top: -(TIP_Y / VIEW_H) * scale,
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </div>,
           document.body,
@@ -284,6 +351,8 @@ function PointAtHover({
       data-slot="point-at-hover"
       className={className}
       onPointerOver={(e) => {
+        // Touch has no hover. Taps and scrolls would otherwise flash the hand everywhere.
+        if (e.pointerType === 'touch') return
         const el = (e.target as Element).closest(selector)
         if (el && e.currentTarget.contains(el)) show(el)
         else hide()
@@ -302,6 +371,20 @@ function PointAtHover({
       />
     </div>
   )
+}
+
+function useViewportSize() {
+  const read = () =>
+    typeof window === 'undefined'
+      ? { width: Infinity, height: Infinity }
+      : { width: window.innerWidth, height: window.innerHeight }
+  const [size, setSize] = React.useState(read)
+  React.useEffect(() => {
+    const update = () => setSize(read())
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return size
 }
 
 /** A hand in a suit sleeve, index finger up, fingertip at (100, 8). */
@@ -390,7 +473,13 @@ function PointingHand(props: React.SVGProps<SVGSVGElement>) {
         <path d="M88 76 Q100 79 112 76" stroke="#b97d5c" strokeWidth="1" opacity=".4" />
         <path d="M84 116 Q100 121 116 116" stroke="#b97d5c" strokeWidth="1.4" opacity=".6" />
         {/* Highlight */}
-        <path d="M96 30 L95 150" stroke="#fff" strokeWidth="5" strokeLinecap="round" opacity=".18" />
+        <path
+          d="M96 30 L95 150"
+          stroke="#fff"
+          strokeWidth="5"
+          strokeLinecap="round"
+          opacity=".18"
+        />
       </g>
     </svg>
   )

@@ -266,10 +266,13 @@ function PointAtHover({
   const closeTimer = React.useRef<number | undefined>(undefined)
 
   const show = (el: Element) => {
+    // Hovers while paused don't count, or the hand would appear the moment it's re-enabled.
+    if (disabled) return
     window.clearTimeout(closeTimer.current)
     setTarget(el)
     setOpen(true)
   }
+  if (disabled && open) setOpen(false)
   const hide = () => {
     window.clearTimeout(closeTimer.current)
     closeTimer.current = window.setTimeout(() => setOpen(false), closeDelay)

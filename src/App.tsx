@@ -183,10 +183,17 @@ function Finale({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
     <section ref={sectionRef} className="flex min-h-svh flex-col items-center justify-center px-4">
       {/* Text sits above the hands so it stays readable. */}
       <h2 className="relative z-[60] text-center text-3xl font-bold tracking-tight [text-shadow:0_2px_16px_#000]">
-        Have you considered promoting?
+        Have you considered following?
       </h2>
       <div ref={ringRef} className="relative mt-16">
-        <button className="rounded-full bg-[#1d9bf0] px-8 py-3 text-lg font-bold text-white">Promote</button>
+        <a
+          href="https://x.com/zahlekhan"
+          target="_blank"
+          rel="noreferrer"
+          className="block rounded-full bg-[#eff3f4] px-8 py-3 text-lg font-bold text-black hover:bg-[#d7dbdc]"
+        >
+          Follow @zahlekhan
+        </a>
         {finaleHands.map((h) => (
           <span
             key={h.deg}
